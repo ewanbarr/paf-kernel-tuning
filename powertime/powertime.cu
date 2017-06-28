@@ -150,8 +150,8 @@ int main()
   thrust::device_vector<float> output(336*27*8);
   for (int ii=0; ii<100; ++ii)
     {
-      //powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
-      //thrust::raw_pointer_cast(output.data()), 864, 4, 8);
+      powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
+        thrust::raw_pointer_cast(output.data()), 864, 4, 8);
       powertime_new_hardcoded<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
       powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()),336,32,27,2,4);
       gpuErrchk(cudaDeviceSynchronize());
