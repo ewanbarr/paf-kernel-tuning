@@ -12,6 +12,7 @@
 #define NACCUMULATE 256
 #define NPOL 2
 #define NSAMPS 4
+#define NCHAN_SUM 16
 
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -120,7 +121,7 @@ __global__ void powertime_new_hardcoded(
 
   if (lane_idx >= NCHAN_FINE_OUT)
     return;
-  
+
   int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
   int out_offset = blockIdx.x * NCHAN_COARSE * NCHAN_FINE_OUT;
 
@@ -147,6 +148,60 @@ __global__ void powertime_new_hardcoded(
   return;
 }
 
+__global__ void powertimefreq_new_hardcoded(
+  cuComplex* __restrict__ in,
+  float* __restrict__ out)
+{
+
+  __shared__ float freq_sum_buffer[NCHAN_FINE_OUT*NCHAN_COARSE]
+
+  int warp_idx = threadIdx.x >> 0x5;
+  int lane_idx = threadIdx.x & 0x1f;
+
+  if (lane_idx >= NCHAN_FINE_OUT)
+    return;
+
+  int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
+  int out_offset = blockIdx.x * NCHAN_COARSE * NCHAN_FINE_OUT / NCHAN_SUM;
+
+  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; coarse_chan_idx += warpSize)
+    {
+      float real = 0.0f;
+      float imag = 0.0f;
+      int coarse_chan_offset = offset + coarse_chan_idx * NPOL * NSAMPS * NCHAN_FINE_IN;
+
+      for (int pol=0; pol<NPOL; ++pol)
+      {
+        int pol_offset = coarse_chan_offset + pol * NSAMPS * NCHAN_FINE_IN;
+        for (int samp=0; samp<NSAMPS; ++samp)
+        {
+          int samp_offset = pol_offset + samp * NCHAN_FINE_IN;
+          cuComplex val = in[samp_offset + lane_idx];
+          real += val.x * val.x;
+          imag += val.y * val.y;
+        }
+      }
+      int output_idx = coarse_chan_idx * NCHAN_FINE_OUT + lane_idx;
+
+      freq_sum_buffer[output_idx] = real+imag; //scaling goes here
+      __syncthreads();
+
+      for (int start_chan=threadIdx.x; start_chan<NCHAN_FINE_OUT*NCHAN_COARSE; start_chan*=blockDim.x)
+      {
+        if ((start_chan+NCHAN_SUM) > NCHAN_FINE_OUT*NCHAN_COARSE)
+          return;
+        float sum = freq_sum_buffer[start_chan];
+        for (int ii=0; idx<4; ++idx)
+        {
+          sum += freq_sum_buffer[start_chan + (1<<ii)];
+          __syncthreads();
+        }
+      }
+      out[out_offset+start_chan/NCHAN_SUM]
+    }
+  return;
+}
+
 int main()
 {
   thrust::device_vector<cuComplex> input(336*32*4*2*NACCUMULATE);
@@ -158,6 +213,7 @@ int main()
       powertime_new_hardcoded<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
       powertime_new<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()),336,32,27,2,4);
       gpuErrchk(cudaDeviceSynchronize());
+      powertimefreq_new_hardcoded<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
     }
   //gpuErrchk(cudaDeviceSynchronize());
 }
