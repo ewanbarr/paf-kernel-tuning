@@ -68,8 +68,50 @@ __global__ void powertime_original(cuComplex* __restrict__ in,
   }
 }
 
-
 __global__ void powertime_new(
+  cuComplex* __restrict__ in,
+  float* __restrict__ out,
+  unsigned int nchan_coarse,
+  unsigned int nchan_fine_in,
+  unsigned int nchan_fine_out,
+  unsigned int npol,
+  unsigned int nsamps)
+{
+  int warp_idx = threadIdx.x / 0x1f;
+  int lane_idx = threadIdx.x & 0x1f;
+
+  //Need to know which chans are being dropped
+  if (lane_idx >= nchan_fine_out)
+    return;
+
+  int offset = blockIdx.x * nchan_coarse * npol * nsamps * nchan_fine_in;
+  int out_offset = blockIdx.x * nchan_coarse * nchan_fine_out;
+
+  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < nchan_coarse; coarse_chan_idx += warpSize)
+    {
+
+      float real = 0.0f;
+      float imag = 0.0f;
+      int coarse_chan_offset = offset + coarse_chan_idx * npol * nsamps * nchan_fine_in;
+
+      for (int pol=0; pol<npol; ++pol)
+      {
+        int pol_offset = coarse_chan_offset + pol * nsamps * nchan_fine_in;
+        for (int samp=0; samp<nsamps; ++samp)
+        {
+          int samp_offset = pol_offset + samp * nchan_fine_in;
+          cuComplex val = in[samp_offset + lane_idx];
+          real += val.x * val.x;
+          imag += val.y * val.y;
+        }
+      }
+      int output_idx = out_offset + coarse_chan_idx * nchan_fine_out + lane_idx;
+      out[output_idx] = real+imag; //scaling goes here
+    }
+  return;
+}
+
+__global__ void powertime_new_hardcoded(
   cuComplex* __restrict__ in,
   float* __restrict__ out)
 {
@@ -81,9 +123,9 @@ __global__ void powertime_new(
     return;
 
   int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
-  int out_offset = blockIdx.x * NCHAN_COARSE * nchan_fine_out;
+  int out_offset = blockIdx.x * NCHAN_COARSE * NCHAN_FINE_OUT;
 
-  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; warp_idx += warpSize)
+  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; coarse_chan_idx += warpSize)
     {
 
       float real = 0.0f;
@@ -101,7 +143,7 @@ __global__ void powertime_new(
           imag += val.y * val.y;
         }
       }
-      int output_idx = out_offset + coarse_chan_idx * nchan_fine_out + lane_idx;
+      int output_idx = out_offset + coarse_chan_idx * NCHAN_FINE_OUT + lane_idx;
       out[output_idx] = real+imag; //scaling goes here
     }
   return;
@@ -115,7 +157,8 @@ int main()
     {
       //powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
       //thrust::raw_pointer_cast(output.data()), 864, 4, 8);
-      powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
+      powertime_new_hardcoded<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
+      powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()),336,32,27,2,4);
       gpuErrchk(cudaDeviceSynchronize());
       printf("One down!\n");
     }
