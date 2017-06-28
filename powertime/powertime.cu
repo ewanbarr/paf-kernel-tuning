@@ -9,7 +9,7 @@
 #define NCHAN_COARSE 336
 #define NCHAN_FINE_IN 32
 #define NCHAN_FINE_OUT 27
-#define NACCUMULATE 8 
+#define NACCUMULATE 8
 #define NPOL 2
 #define NSAMPS 4
 
@@ -40,7 +40,7 @@ __global__ void powertime_original(cuComplex* __restrict__ in,
   int skip1, skip2;
   float power1, power2;
   float avgfactor= 1.0f / factort;
-  
+
   for (int ac = 0; ac < acc; ac++) {
     skip1 = ac * 336 * 128 * 2;
     skip2 = ac * 336 * 27;
@@ -69,8 +69,9 @@ __global__ void powertime_original(cuComplex* __restrict__ in,
 }
 
 
-__global__ void powertime_new(cuComplex* __restrict__ in,
-                              float* __restrict__ out)
+__global__ void powertime_new(
+  cuComplex* __restrict__ in,
+  float* __restrict__ out)
 {
   int warp_idx = threadIdx.x / 0x1f;
   int lane_idx = threadIdx.x & 0x1f;
@@ -79,26 +80,27 @@ __global__ void powertime_new(cuComplex* __restrict__ in,
   if (lane_idx >= NCHAN_FINE_OUT)
     return;
 
-  int offset = blockIdx.x * nchan_coarse * npol * nsamps * nchan_fine_in;
-  int out_offset = blockIdx.x * nchan_coarse * nchan_fine_out; 
-  for (int coarse_chan_idx=warp_idx; coarse_chan_idx<nchan_coarse; warp_idx+=warpSize)
+  int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
+  int out_offset = blockIdx.x * NCHAN_COARSE * nchan_fine_out;
+
+  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; warp_idx += warpSize)
     {
-      
+
       float real = 0.0f;
       float imag = 0.0f;
-      int coarse_chan_offset = offset + coarse_chan_idx * npol * nsamps * nchan_fine_in;
-      
-      for (int pol=0; pol<npol; ++pol)
-	{
-	  int pol_offset = coarse_chan_offset + pol * nsamps * nchan_fine_in;
-	  for (int samp=0; samp<nsamps; ++samp)
-	    {
-	      int samp_offset = pol_offset + samp * nchan_fine_in;
-	      cuComplex val = in[samp_offset + lane_idx];
-	      real += val.x * val.x;
-	      imag += val.y * val.y;
-	    }
-	}
+      int coarse_chan_offset = offset + coarse_chan_idx * NPOL * NSAMPS * NCHAN_FINE_IN;
+
+      for (int pol=0; pol<NPOL; ++pol)
+      {
+        int pol_offset = coarse_chan_offset + pol * NSAMPS * NCHAN_FINE_IN;
+        for (int samp=0; samp<NSAMPS; ++samp)
+        {
+          int samp_offset = pol_offset + samp * NCHAN_FINE_IN;
+          cuComplex val = in[samp_offset + lane_idx];
+          real += val.x * val.x;
+          imag += val.y * val.y;
+        }
+      }
       int output_idx = out_offset + coarse_chan_idx * nchan_fine_out + lane_idx;
       out[output_idx] = real+imag; //scaling goes here
     }
@@ -113,7 +115,7 @@ int main()
     {
       //powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
       //thrust::raw_pointer_cast(output.data()), 864, 4, 8);
-      powertime_new<8,336,2,4,32,27><<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
+      powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
       gpuErrchk(cudaDeviceSynchronize());
       printf("One down!\n");
     }
