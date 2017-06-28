@@ -73,19 +73,14 @@ __global__ void powertime_new(
   cuComplex* __restrict__ in,
   float* __restrict__ out)
 {
-  int warp_idx = threadIdx.x / 0x1f;
+  int warp_idx = threadIdx.x >> 0x5;
   int lane_idx = threadIdx.x & 0x1f;
 
-  //Need to know which chans are being dropped
-  if (lane_idx >= NCHAN_FINE_OUT)
-    return;
-
   int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
-  int out_offset = blockIdx.x * NCHAN_COARSE * nchan_fine_out;
+  int out_offset = blockIdx.x * NCHAN_COARSE * NCHAN_FINE_OUT;
 
-  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; warp_idx += warpSize)
+  for (int coarse_chan_idx = warp_idx; coarse_chan_idx < NCHAN_COARSE; coarse_chan_idx += warpSize)
     {
-
       float real = 0.0f;
       float imag = 0.0f;
       int coarse_chan_offset = offset + coarse_chan_idx * NPOL * NSAMPS * NCHAN_FINE_IN;
@@ -101,8 +96,9 @@ __global__ void powertime_new(
           imag += val.y * val.y;
         }
       }
-      int output_idx = out_offset + coarse_chan_idx * nchan_fine_out + lane_idx;
-      out[output_idx] = real+imag; //scaling goes here
+      int output_idx = out_offset + coarse_chan_idx * NCHAN_FINE_OUT + lane_idx;
+      if (lane_idx < NCHAN_FINE_OUT)
+	out[output_idx] = real+imag; //scaling goes here
     }
   return;
 }
@@ -111,13 +107,12 @@ int main()
 {
   thrust::device_vector<cuComplex> input(336*32*4*2*8);
   thrust::device_vector<float> output(336*27*8);
-  for (int ii=0; ii<10; ++ii)
+  for (int ii=0; ii<100; ++ii)
     {
-      //powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
-      //thrust::raw_pointer_cast(output.data()), 864, 4, 8);
+      powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
+					thrust::raw_pointer_cast(output.data()), 864, 4, 8);
       powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
       gpuErrchk(cudaDeviceSynchronize());
-      printf("One down!\n");
     }
   //gpuErrchk(cudaDeviceSynchronize());
 }
