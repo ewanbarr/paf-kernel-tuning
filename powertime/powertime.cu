@@ -9,7 +9,7 @@
 #define NCHAN_COARSE 336
 #define NCHAN_FINE_IN 32
 #define NCHAN_FINE_OUT 27
-#define NACCUMULATE 8
+#define NACCUMULATE 256
 #define NPOL 2
 #define NSAMPS 4
 
@@ -77,7 +77,7 @@ __global__ void powertime_new(
   unsigned int npol,
   unsigned int nsamps)
 {
-  int warp_idx = threadIdx.x / 0x1f;
+  int warp_idx = threadIdx.x >> 0x5;
   int lane_idx = threadIdx.x & 0x1f;
 
   //Need to know which chans are being dropped
@@ -118,6 +118,9 @@ __global__ void powertime_new_hardcoded(
   int warp_idx = threadIdx.x >> 0x5;
   int lane_idx = threadIdx.x & 0x1f;
 
+  if (lane_idx >= NCHAN_FINE_OUT)
+    return;
+  
   int offset = blockIdx.x * NCHAN_COARSE * NPOL * NSAMPS * NCHAN_FINE_IN;
   int out_offset = blockIdx.x * NCHAN_COARSE * NCHAN_FINE_OUT;
 
@@ -146,14 +149,14 @@ __global__ void powertime_new_hardcoded(
 
 int main()
 {
-  thrust::device_vector<cuComplex> input(336*32*4*2*8);
-  thrust::device_vector<float> output(336*27*8);
+  thrust::device_vector<cuComplex> input(336*32*4*2*NACCUMULATE);
+  thrust::device_vector<float> output(336*27*NACCUMULATE);
   for (int ii=0; ii<100; ++ii)
     {
       powertime_original<<<48, 27, 0>>>(thrust::raw_pointer_cast(input.data()),
-        thrust::raw_pointer_cast(output.data()), 864, 4, 8);
-      powertime_new_hardcoded<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
-      powertime_new<<<8,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()),336,32,27,2,4);
+        thrust::raw_pointer_cast(output.data()), 864, NSAMPS, NACCUMULATE);
+      powertime_new_hardcoded<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
+      powertime_new<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()),336,32,27,2,4);
       gpuErrchk(cudaDeviceSynchronize());
     }
   //gpuErrchk(cudaDeviceSynchronize());
