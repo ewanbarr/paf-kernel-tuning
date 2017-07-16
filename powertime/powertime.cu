@@ -153,7 +153,7 @@ __global__ void powertimefreq_new_hardcoded(
   float* __restrict__ out)
 {
 
-  __shared__ float freq_sum_buffer[NCHAN_FINE_OUT*NCHAN_COARSE]
+  __shared__ float freq_sum_buffer[NCHAN_FINE_OUT*NCHAN_COARSE];
 
   int warp_idx = threadIdx.x >> 0x5;
   int lane_idx = threadIdx.x & 0x1f;
@@ -186,18 +186,16 @@ __global__ void powertimefreq_new_hardcoded(
       freq_sum_buffer[output_idx] = real+imag; //scaling goes here
       __syncthreads();
 
-      for (int start_chan=threadIdx.x; start_chan<NCHAN_FINE_OUT*NCHAN_COARSE; start_chan*=blockDim.x)
+      for (int start_chan=threadIdx.x; start_chan < (NCHAN_FINE_OUT * NCHAN_COARSE - NCHAN_SUM); start_chan+=blockDim.x)
       {
-        if ((start_chan+NCHAN_SUM) > NCHAN_FINE_OUT*NCHAN_COARSE)
-          return;
         float sum = freq_sum_buffer[start_chan];
-        for (int ii=0; idx<4; ++idx)
+        for (int ii=0; ii<4; ++ii)
         {
           sum += freq_sum_buffer[start_chan + (1<<ii)];
           __syncthreads();
         }
+	out[out_offset+start_chan/NCHAN_SUM] = sum;
       }
-      out[out_offset+start_chan/NCHAN_SUM]
     }
   return;
 }
