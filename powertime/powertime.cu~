@@ -10,7 +10,6 @@
 #define NCHAN_FINE_IN 32
 #define NCHAN_FINE_OUT 27
 #define NACCUMULATE 256
-#define SAMPS_PER_ACCUMULATE 128
 #define NPOL 2
 #define NSAMPS 4
 #define NCHAN_SUM 16
@@ -257,29 +256,7 @@ __global__ void powertimefreq_new_hardcoded_pft(
   return;
 }
 
-int unpacked_to_powertime_test()
-{
-    // This is the output from the rearrange/unpack kernel
-    // The data should be ordered in PFT order
-    thrust::device_vector<cuComplex> unpacked_pft(NPOL*NCHAN_COARSE*NACCUMULATE*SAMPS_PER_ACCUMULATE);
-    thrust::device_vector<cuComplex> fft_output_pfft(unpacked_pft.size());
-    cufftHandle plan;
-
-    int inembed[] = {0}; //This is ignored for 1D transforms (but can't be NULL)
-    int onembed[] = {0}; //This is ignored for 1D transforms (but can't be NULL)
-    int istride = 1; //
-    int idist = NCHAN_FINE_IN; //Batches of 32
-    int ostride = NACCUMULATE*SAMPS_PER_ACCUMULATE/NCHAN_FINE_IN; // This is to support the output transpose
-    int odist = 1;
-    int transform_size = NCHAN_FINE_IN;
-    int batch = unpacked_pft.size()/NCHAN_FINE_IN; //This must be a multiple of 2 or 4.
-    gpuErrchk(cufftPlanMany(&plan, 1, &transform_size, &inembed, istride, idist, &onembed, ostride, odist, CUFFT_C2C, batch));
-    cufftComplex* fft_input_cast = (cufftComplex*) thrust::raw_pointer_cast(unpacked_pft.data());
-    cufftComplex* fft_output_cast = (cufftComplex*) thrust::raw_pointer_cast(fft_output_pfft.data());
-    gpuErrchk(cufftExecC2C(plan, fft_input_cast, fft_output_cast, CUFFT_FORWARD));
-}
-
-int powertime_tests()
+int main()
 {
   thrust::device_vector<cuComplex> input(336*32*4*2*NACCUMULATE);
   thrust::device_vector<float> output(336*27*NACCUMULATE);
@@ -305,12 +282,8 @@ int powertime_tests()
       gpuErrchk(cudaDeviceSynchronize());
       powertimefreq_new_hardcoded<<<NACCUMULATE,1024,0>>>(thrust::raw_pointer_cast(input.data()),thrust::raw_pointer_cast(output.data()));
     }
-    gpuErrchk(cudaDeviceSynchronize());
-}
 
-int main()
-{
-    powertime_tests();
-    unpacked_to_powertime_test();
+
+  //gpuErrchk(cudaDeviceSynchronize());
 }
 
