@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <stdexcept>
 #include "thrust/device_vector.h"
 #include "cuComplex.h"
+#include "cufft.h"
 
 #define XSIZE 7
 #define YSIZE 128
@@ -201,12 +203,13 @@ __global__ void powertimefreq_new_hardcoded(
   return;
 }
 
+/*
 __global__ void powertimefreq_new_hardcoded_pft(
   cuComplex* __restrict__ in,
   float* __restrict__ out)
 {
 
-  __shared__ float freq_sum_buffer[NCHAN_FINE_OUT*NCHAN_COARSE]
+  __shared__ float freq_sum_buffer[NCHAN_FINE_OUT*NCHAN_COARSE];
 
   int warp_idx = threadIdx.x >> 0x5;
   int lane_idx = threadIdx.x & 0x1f;
@@ -239,23 +242,24 @@ __global__ void powertimefreq_new_hardcoded_pft(
       freq_sum_buffer[output_idx] = real+imag; //scaling goes here
       __syncthreads();
 
-      for (int start_chan=threadIdx.x; start_chan<NCHAN_FINE_OUT*NCHAN_COARSE; start_chan*=blockDim.x)
+      int start_chan;
+      for (start_chan=threadIdx.x; start_chan<NCHAN_FINE_OUT*NCHAN_COARSE; start_chan*=blockDim.x)
       {
         if ((start_chan+NCHAN_SUM) > NCHAN_FINE_OUT*NCHAN_COARSE)
           return;
         float sum = freq_sum_buffer[start_chan];
-        for (int ii=0; idx<4; ++idx)
+        for (int ii=0; ii<4; ++ii)
         {
           sum += freq_sum_buffer[start_chan + (1<<ii)];
           __syncthreads();
         }
       }
-      out[out_offset+start_chan/NCHAN_SUM]
+      out[out_offset+start_chan/NCHAN_SUM];
     }
   return;
 }
-
-int unpacked_to_powertime_test()
+*/
+void unpacked_to_powertime_test()
 {
     // This is the output from the rearrange/unpack kernel
     // The data should be ordered in PFT order
@@ -271,13 +275,22 @@ int unpacked_to_powertime_test()
     int odist = 1;
     int transform_size = NCHAN_FINE_IN;
     int batch = unpacked_pft.size()/NCHAN_FINE_IN; //This must be a multiple of 2 or 4.
-    gpuErrchk(cufftPlanMany(&plan, 1, &transform_size, &inembed, istride, idist, &onembed, ostride, odist, CUFFT_C2C, batch));
+    if (cufftPlanMany(&plan, 1, &transform_size, inembed, istride, idist, onembed, ostride, odist, CUFFT_C2C, batch) != 0)
+      {
+	throw std::runtime_error("cufftPlanMany returned non-zero exit status ");
+      }
     cufftComplex* fft_input_cast = (cufftComplex*) thrust::raw_pointer_cast(unpacked_pft.data());
     cufftComplex* fft_output_cast = (cufftComplex*) thrust::raw_pointer_cast(fft_output_pfft.data());
-    gpuErrchk(cufftExecC2C(plan, fft_input_cast, fft_output_cast, CUFFT_FORWARD));
+    for (int ii=0;ii<100;++ii)
+      {
+	if (cufftExecC2C(plan, fft_input_cast, fft_output_cast, CUFFT_FORWARD) != 0 )
+	  {
+	    throw std::runtime_error("cufftExecC2C returned non-zero exit status ");
+	  }
+      }
 }
 
-int powertime_tests()
+void powertime_tests()
 {
   thrust::device_vector<cuComplex> input(336*32*4*2*NACCUMULATE);
   thrust::device_vector<float> output(336*27*NACCUMULATE);
